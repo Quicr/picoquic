@@ -221,7 +221,9 @@ endif()
 
 OPTION(WITH_OPENSSL "build with OpenSSL" ON)
 
-if(WITH_OPENSSL)
+if (OPENSSL_FOUND)
+    message(STATUS "OpenSSL already found: ${OPENSSL_ROOT_DIR}")
+elseif (WITH_OPENSSL)
     find_package(OpenSSL REQUIRED)
     message(STATUS "root: ${OPENSSL_ROOT_DIR}")
     message(STATUS "OpenSSL_VERSION: ${OPENSSL_VERSION}")
@@ -233,6 +235,7 @@ else()
     message(STATUS "Building without picotls-openssl")
     list(APPEND PICOQUIC_COMPILE_DEFINITIONS PTLS_WITHOUT_OPENSSL)
 endif()
+
 # set_picoquic_compile_settings(TARGET) makes is easy to consistently
 # assign compiler build options to each of the following targets
 macro(set_picoquic_compile_settings)
@@ -312,27 +315,26 @@ target_include_directories(picohttp-core
         picoquic)
 set_picoquic_compile_settings(picohttp-core)
 
-add_executable(picoquicdemo
-    picoquicfirst/picoquicdemo.c
-    picoquicfirst/getopt.c)
-target_link_libraries(picoquicdemo
-    PRIVATE
-        ${PTLS_LIBRARIES}
-        ${OPENSSL_LIBRARIES}
-        picoquic-log
-        picoquic-core
-        picohttp-core)
-target_include_directories(picoquicdemo PRIVATE picohttp)
-set_picoquic_compile_settings(picoquicdemo)
-
 add_executable(picolog_t picolog/picolog.c)
 target_link_libraries(picolog_t PRIVATE picoquic-log picoquic-core)
 target_include_directories(picolog_t PRIVATE loglib)
 set_picoquic_compile_settings(picolog_t)
 
-include(CTest)
-
 if(BUILD_TESTING AND picoquic_BUILD_TESTS)
+    add_executable(picoquicdemo
+            picoquicfirst/picoquicdemo.c
+            picoquicfirst/getopt.c)
+    target_link_libraries(picoquicdemo
+            PRIVATE
+            ${PTLS_LIBRARIES}
+            ${OPENSSL_LIBRARIES}
+            picoquic-log
+            picoquic-core
+            picohttp-core)
+    target_include_directories(picoquicdemo PRIVATE picohttp)
+    set_picoquic_compile_settings(picoquicdemo)
+
+    include(CTest)
 
     add_library(picoquic-test STATIC ${PICOQUIC_TEST_LIBRARY_FILES})
     target_link_libraries(picoquic-test PUBLIC picoquic-core picoquic-log)
@@ -385,8 +387,10 @@ add_custom_target(
     ${CLANG_FORMAT_SOURCE_FILES})
 
 # Specify Install targets
-install(TARGETS picoquicdemo picolog_t picoquic-core picoquic-log picohttp-core
+install(TARGETS picolog_t picoquic-core picoquic-log picohttp-core
         RUNTIME DESTINATION bin
+        BUNDLE DESTINATION bin
+        FRAMEWORK DESTINATION lib
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib)
 
