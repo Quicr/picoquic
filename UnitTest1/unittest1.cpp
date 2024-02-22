@@ -160,6 +160,13 @@ namespace UnitTest1
             Assert::AreEqual(ret, 0);
         }
 
+        TEST_METHOD(sockloop_thread_name)
+        {
+            int ret = sockloop_thread_name_test();
+
+            Assert::AreEqual(ret, 0);
+        }
+
         TEST_METHOD(splay)
         {
             int ret = splay_test();
@@ -2237,6 +2244,12 @@ namespace UnitTest1
 
         TEST_METHOD(mediatest_video2_down) {
             int ret = mediatest_video2_down_test();
+
+            Assert::AreEqual(ret, 0);
+        }
+
+        TEST_METHOD(mediatest_wifi) {
+            int ret = mediatest_wifi_test();
 
             Assert::AreEqual(ret, 0);
         }
