@@ -194,8 +194,25 @@ void picoquic_update_path_rtt(picoquic_cnx_t* cnx, picoquic_path_t* old_path, pi
                 }
             }
         }
+
         old_path->rtt_sample = rtt_estimate;
-#ifdef PICOQUIC_TESTING_CLASSIC_RTT_COMPUTATION
+
+        /*
+         * Often RTT will have benign spikes (e.g, wifi scanning, cpu, ...). Use 1/3
+         *  of the latency spike plus max for the period for two times before using
+         *  the full value of the spike. This will cap the amount of increase for
+         *  the initial outlier spikes.
+         */
+        if (rtt_estimate * 3 > old_path->max_rtt_estimate_in_period) {
+            if (old_path->nb_rtt_outliers_in_period < 2) {
+                old_path->nb_rtt_outliers_in_period++;
+                rtt_estimate = old_path->max_rtt_estimate_in_period + (rtt_estimate * 0.33);
+            } else {
+                old_path->nb_rtt_outliers_in_period = 0;
+            }
+        }
+
+    #ifdef PICOQUIC_TESTING_CLASSIC_RTT_COMPUTATION
         if (is_first) {
             old_path->smoothed_rtt = rtt_estimate;
             old_path->rtt_variant = rtt_estimate / 2;
@@ -252,6 +269,7 @@ void picoquic_update_path_rtt(picoquic_cnx_t* cnx, picoquic_path_t* old_path, pi
         */
         old_path->nb_rtt_estimate_in_period += 1;
         old_path->sum_rtt_estimate_in_period += rtt_estimate;
+
         if (old_path->nb_rtt_estimate_in_period == 1) {
             old_path->min_rtt_estimate_in_period = rtt_estimate;
             old_path->max_rtt_estimate_in_period = rtt_estimate;
@@ -282,7 +300,7 @@ void picoquic_update_path_rtt(picoquic_cnx_t* cnx, picoquic_path_t* old_path, pi
         /* At the end of the period, update the smoothed and variants statistics.
         */
         if (old_path->path_packet_acked_number >= old_path->path_packet_previous_period ||
-            old_path->path_rtt_last_period_time + (rtt_estimate/4) > current_time) {
+            old_path->path_rtt_last_period_time + (rtt_estimate/6) > current_time) {
             old_path->path_rtt_last_period_time = current_time;
 
             if (old_path->nb_rtt_estimate_in_period > 1) {
@@ -331,6 +349,7 @@ void picoquic_update_path_rtt(picoquic_cnx_t* cnx, picoquic_path_t* old_path, pi
             old_path->path_packet_previous_period = old_path->path_packet_number;
             old_path->nb_rtt_estimate_in_period = 0;
             old_path->sum_rtt_estimate_in_period = 0;
+            old_path->nb_rtt_outliers_in_period = 0;
             old_path->max_rtt_estimate_in_period = 0;
             old_path->min_rtt_estimate_in_period = UINT64_MAX;
         }

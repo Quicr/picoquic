@@ -1117,6 +1117,7 @@ typedef struct st_picoquic_path_t {
 
     uint64_t path_packet_previous_period;
     uint64_t path_rtt_last_period_time;
+    uint64_t nb_rtt_outliers_in_period;
     uint64_t nb_rtt_estimate_in_period;
     uint64_t sum_rtt_estimate_in_period;
     uint64_t max_rtt_estimate_in_period;
