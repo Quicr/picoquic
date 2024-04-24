@@ -372,7 +372,7 @@ int picoquic_packet_loop_open_socket(int socket_buffer_size, int do_not_use_gso,
     }
     else {
         // TODO: Add API to set DSCP/TOS
-        int tos = 0xb8;
+        int tos = 0xb8; // 0x88 = AF41, 0xb8 == EF
         if(setsockopt(s_ctx->fd, IPPROTO_IP, IP_TOS, &tos, sizeof(tos)) < 0) {
             DBG_PRINTF("setsockopt IPv4 IP_TOS (0x%x) fails, errno: %d\n", tos, errno);
         }
