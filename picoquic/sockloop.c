@@ -383,14 +383,14 @@ int picoquic_packet_loop_open_socket(int socket_buffer_size, int do_not_use_gso,
 
         if (local_address.ss_family == AF_INET6) {
             if(setsockopt(s_ctx->fd, IPPROTO_IPV6, IPV6_TCLASS, &tos, sizeof(tos)) < 0) {
-                DBG_PRINTF("setsockopt fd: %llu IPv46 TC CLASS (0x%x) fails, errno: %d\n", s_ctx->fd, tos, errno);
+                DBG_PRINTF("setsockopt IPv46 TC CLASS (0x%x) fails, errno: %d\n", tos, errno);
             }
 
             s_ctx->port = ntohs(((struct sockaddr_in6*)&local_address)->sin6_port);
         }
         else if (local_address.ss_family == AF_INET) {
             if(setsockopt(s_ctx->fd, IPPROTO_IP, IP_TOS, &tos, sizeof(tos)) < 0) {
-                DBG_PRINTF("setsockopt fd: %llu IPv4 IP_TOS (0x%x) fails, errno: %d\n", s_ctx->fd, tos, errno);
+                DBG_PRINTF("setsockopt IPv4 IP_TOS (0x%x) fails, errno: %d\n", tos, errno);
             }
 
             s_ctx->port = ntohs(((struct sockaddr_in*)&local_address)->sin_port);
