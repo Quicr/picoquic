@@ -47,7 +47,6 @@ void picoquic_mbedtls_load(int unload)
 #include "picotls.h"
 #include "picoquic_crypto_provider_api.h"
 #include "picoquic_utils.h"
-#include "mbedtls/chacha20.h"
 #include "mbedtls/ecdh.h"
 
 
@@ -378,79 +377,6 @@ ptls_cipher_algorithm_t ptls_mbedtls_aes256ctr = {
     ptls_mbedtls_cipher_setup_aes256_ctr};
 
 
-#if 0
-/*
- * Implementation of CHACHA20 using the PSA API.
- * This is disabled for now, as there seems to be an issue when
- * setting the 16 bytes long IV that we need.
- */
-static int ptls_mbedtls_cipher_setup_crypto_chacha20(ptls_cipher_context_t *_ctx, int is_enc, const void *key_bytes)
-{
-    return ptls_mbedtls_cipher_setup_crypto(_ctx, is_enc, key_bytes,
-        PSA_ALG_STREAM_CIPHER, 16, PSA_KEY_TYPE_CHACHA20, 256);
-}
-
-ptls_cipher_algorithm_t ptls_mbedtls_chacha20 = {
-    "CHACHA20", PTLS_CHACHA20_KEY_SIZE, 1 /* block size */, PTLS_CHACHA20_IV_SIZE, sizeof(struct st_ptls_mbedtls_cipher_context_t),
-    ptls_mbedtls_cipher_setup_crypto_chacha20};
-#else
-/* Implementation of ChaCha20 using the low level ChaCha20 API.
- * TODO: remove this and the reference to chacha20.h as soon as
- * the IV bug in the generic implementation is fixed.
- */
-struct st_ptls_mbedtls_chacha20_context_t {
-    ptls_cipher_context_t super;
-    mbedtls_chacha20_context mctx;
-};
-
-static void ptls_mbedtls_chacha20_init(ptls_cipher_context_t *_ctx, const void *v_iv)
-{
-    struct st_ptls_mbedtls_chacha20_context_t *ctx = (struct st_ptls_mbedtls_chacha20_context_t *)_ctx;
-    const uint8_t* iv = (const uint8_t*)v_iv;
-    uint32_t ctr = iv[0] | ((uint32_t)iv[1] << 8) | ((uint32_t)iv[2] << 16) | ((uint32_t)iv[3] << 24);
-
-    (void)mbedtls_chacha20_starts(&ctx->mctx, (const uint8_t*)(iv+4), ctr);
-}
-
-static void ptls_mbedtls_chacha20_transform(ptls_cipher_context_t *_ctx, void *output, const void *input, size_t len)
-{
-    struct st_ptls_mbedtls_chacha20_context_t *ctx = (struct st_ptls_mbedtls_chacha20_context_t *)_ctx;
-
-    if (mbedtls_chacha20_update(&ctx->mctx, len, 
-        (const uint8_t*)input, (uint8_t*)output) != 0) {
-        memset(output, 0, len);
-    }
-}
-
-static void ptls_mbedtls_chacha20_dispose(ptls_cipher_context_t *_ctx)
-{
-    struct st_ptls_mbedtls_chacha20_context_t *ctx = (struct st_ptls_mbedtls_chacha20_context_t *)_ctx;
-    mbedtls_chacha20_free(&ctx->mctx);
-}
-
-static int ptls_mbedtls_cipher_setup_crypto_chacha20(ptls_cipher_context_t *_ctx, int is_enc, const void *key)
-{
-    struct st_ptls_mbedtls_chacha20_context_t *ctx = (struct st_ptls_mbedtls_chacha20_context_t *)_ctx;
-    int ret = 0;
-
-    mbedtls_chacha20_init(&ctx->mctx);
-    ret = mbedtls_chacha20_setkey(&ctx->mctx, (const uint8_t*)key);
-
-    ctx->super.do_dispose = ptls_mbedtls_chacha20_dispose;
-    ctx->super.do_init = ptls_mbedtls_chacha20_init;
-    ctx->super.do_transform = NULL;
-
-    if (ret == 0) {
-        ctx->super.do_transform = ptls_mbedtls_chacha20_transform;
-    }
-
-    return ret;
-}
-
-ptls_cipher_algorithm_t ptls_mbedtls_chacha20 = {
-    "CHACHA20", PTLS_CHACHA20_KEY_SIZE, 1 /* block size */, PTLS_CHACHA20_IV_SIZE, sizeof(struct st_ptls_mbedtls_chacha20_context_t),
-    ptls_mbedtls_cipher_setup_crypto_chacha20};
-#endif
 
 /* Definitions of AEAD algorithms.
 * 
@@ -770,32 +696,6 @@ ptls_cipher_suite_t ptls_mbedtls_aes256gcmsha384 = {
 .aead = &ptls_mbedtls_aes256gcm,
 .hash = &ptls_mbedtls_sha384};
 
-static int ptls_mbedtls_aead_setup_chacha20poly1305(ptls_aead_context_t* _ctx, int is_enc, const void* key_bytes, const void* iv)
-{
-    return ptls_mbedtls_aead_setup_crypto(_ctx, is_enc, key_bytes, iv, PSA_ALG_CHACHA20_POLY1305, 256, PSA_KEY_TYPE_CHACHA20);
-}
-
-ptls_aead_algorithm_t ptls_mbedtls_chacha20poly1305 = {
-    "CHACHA20-POLY1305",
-    PTLS_CHACHA20POLY1305_CONFIDENTIALITY_LIMIT,
-    PTLS_CHACHA20POLY1305_INTEGRITY_LIMIT,
-    &ptls_mbedtls_chacha20,
-    NULL,
-    PTLS_CHACHA20_KEY_SIZE,
-    PTLS_CHACHA20POLY1305_IV_SIZE,
-    PTLS_CHACHA20POLY1305_TAG_SIZE,
-    {PTLS_TLS12_CHACHAPOLY_FIXED_IV_SIZE, PTLS_TLS12_CHACHAPOLY_RECORD_IV_SIZE},
-    0,
-    0,
-    sizeof(struct ptls_mbedtls_aead_context_t),
-    ptls_mbedtls_aead_setup_chacha20poly1305
-};
-
-ptls_cipher_suite_t ptls_mbedtls_chacha20poly1305sha256 = {.id = PTLS_CIPHER_SUITE_CHACHA20_POLY1305_SHA256,
-.name = PTLS_CIPHER_SUITE_NAME_CHACHA20_POLY1305_SHA256,
-.aead = &ptls_mbedtls_chacha20poly1305,
-.hash = &ptls_mbedtls_sha256};
-
 /* Key exchange algorithms.
  * The Picotls framework defines these algorithms as ptls_key_exchange_algorithm_t,
  * a structure containing two function pointers:
@@ -1024,7 +924,6 @@ void picoquic_mbedtls_load(int unload)
 
         picoquic_register_ciphersuite(&ptls_mbedtls_aes128gcmsha256, 1);
         picoquic_register_ciphersuite(&ptls_mbedtls_aes256gcmsha384, 1);
-        picoquic_register_ciphersuite(&ptls_mbedtls_chacha20poly1305sha256, 1);
         picoquic_register_key_exchange_algorithm(&ptls_mbedtls_secp256r1);
         picoquic_register_key_exchange_algorithm(&ptls_mbedtls_x25519);
 
