@@ -613,7 +613,9 @@ int picoquic_remove_header_protection_inner(
             uint32_t pn_val = 0;
 
             memcpy(decrypted_bytes, bytes, ph->pn_offset);
+#ifndef ENCRYPTION_BYPASS            
             picoquic_pn_encrypt(pn_enc, bytes + sample_offset, mask_bytes, mask_bytes, mask_length);
+#endif
             /* Decode the first byte */
             first_byte ^= (mask_bytes[0] & first_mask);
             pn_l = (first_byte & 3) + 1;

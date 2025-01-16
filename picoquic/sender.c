@@ -817,7 +817,9 @@ void picoquic_protect_packet_header(uint8_t * send_buffer, size_t pn_offset, uin
         uint8_t mask_bytes[5] = { 0, 0, 0, 0, 0 };
         uint8_t pn_l;
 
+#ifndef ENCRYPTION_BYPASS            
         picoquic_pn_encrypt(pn_enc, send_buffer + sample_offset, mask_bytes, mask_bytes, 5);
+#endif        
         /* Encode the first byte */
         pn_l = (send_buffer[0] & 3) + 1;
         send_buffer[0] ^= (mask_bytes[0] & first_mask);
