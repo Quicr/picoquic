@@ -118,6 +118,8 @@ int picoquic_screen_initial_packet(
         uint8_t decrypted_bytes[PICOQUIC_MAX_PACKET_SIZE];
         picoquic_packet_header dph = *ph;
 
+#ifndef ENCRYPTION_BYPASS          
+
         if (picoquic_get_initial_aead_context(quic, ph->version_index, &ph->dest_cnx_id,
             0 /* is_client=0 */, 0 /* is_enc = 0 */, &aead_ctx, &pn_dec_ctx) == 0) {
             ret = picoquic_remove_header_protection_inner((uint8_t *)bytes, ph->offset + ph->payload_length,
@@ -144,6 +146,7 @@ int picoquic_screen_initial_packet(
             /* Free the PN encryption context */
             picoquic_cipher_free(pn_dec_ctx);
         }
+#endif
 
         if (ret == 0) {
             if (quic->enforce_client_only) {
@@ -244,7 +247,7 @@ int picoquic_parse_long_packet_header(
             ret = PICOQUIC_ERROR_VERSION_NOT_SUPPORTED;
         }
     }
-    
+
     if (ret == 0 && (
         (bytes = picoquic_frames_cid_decode(bytes, bytes_max, &ph->dest_cnx_id)) == NULL ||
         (bytes = picoquic_frames_cid_decode(bytes, bytes_max, &ph->srce_cnx_id)) == NULL)) {

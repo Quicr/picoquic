@@ -2403,9 +2403,14 @@ size_t picoquic_aead_decrypt_generic(uint8_t* output, const uint8_t* input, size
     if (aead_ctx == NULL) {
         decrypted = SIZE_MAX;
     } else {
+#ifndef ENCRYPTION_BYPASS
         decrypted = ptls_aead_decrypt((ptls_aead_context_t*)aead_ctx,
             (void*)output, (const void*)input, input_length, seq_num,
             (void*)auth_data, auth_data_length);
+#else
+    memcpy(output, input, input_length);
+    decrypted = input_length;
+#endif
     }
 
     return decrypted;
@@ -2416,10 +2421,14 @@ size_t picoquic_aead_encrypt_generic(uint8_t* output, const uint8_t* input, size
 {
     size_t encrypted = 0;
 
+#ifndef ENCRYPTION_BYPASS
     encrypted = ptls_aead_encrypt((ptls_aead_context_t*)aead_context,
         (void*)output, (const void*)input, input_length, seq_num,
         (void*)auth_data, auth_data_length);
-
+#else
+    memcpy(output, input, input_length);
+    encrypted = input_length;
+#endif
     return encrypted;
 }
 

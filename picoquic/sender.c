@@ -876,7 +876,11 @@ size_t picoquic_protect_packet(picoquic_cnx_t* cnx,
 
     /* Make sure that the payload length is encoded in the header */
     /* Using encryption, the "payload" length also includes the encrypted packet length */
+#ifndef ENCRYPTION_BYPASS
     picoquic_update_payload_length(send_buffer, pn_offset, h_length - pn_length, length + aead_checksum_length);
+#else
+    picoquic_update_payload_length(send_buffer, pn_offset, h_length - pn_length, length + 0);
+#endif    
 
     /* If fuzzing is required, apply it */
     if (cnx->quic->fuzz_fn != NULL) {
