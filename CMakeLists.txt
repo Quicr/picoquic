@@ -8,7 +8,7 @@ else()
 endif()
 
 project(picoquic
-        VERSION 1.1.30.1
+        VERSION 1.1.33.2
         DESCRIPTION "picoquic library"
         LANGUAGES C CXX)
 
@@ -90,6 +90,7 @@ set(PICOQUIC_LIBRARY_FILES
     picoquic/newreno.c
     picoquic/pacing.c
     picoquic/packet.c
+    picoquic/paths.c
     picoquic/performance_log.c
     picoquic/picohash.c
     picoquic/picoquic_lb.c
@@ -102,9 +103,11 @@ set(PICOQUIC_LIBRARY_FILES
     picoquic/port_blocking.c
     picoquic/prague.c
     picoquic/quicctx.c
+    picoquic/register_all_cc_algorithms.c
     picoquic/sacks.c
     picoquic/sender.c
     picoquic/sim_link.c
+    picoquic/siphash.c
     picoquic/sockloop.c
     picoquic/spinbit.c
     picoquic/ticket_store.c
@@ -124,7 +127,14 @@ set(PICOQUIC_CORE_HEADERS
      picoquic/picoquic_logger.h
      picoquic/picoquic_binlog.h
      picoquic/picoquic_config.h
-     picoquic/picoquic_lb.h)
+     picoquic/picoquic_lb.h
+     picoquic/picoquic_newreno.h
+     picoquic/picoquic_cubic.h
+     picoquic/picoquic_bbr.h
+     picoquic/picoquic_bbr1.h
+     picoquic/picoquic_fastcc.h
+     picoquic/picoquic_prague.h
+     picoquic/siphash.h)
 
 set(LOGLIB_LIBRARY_FILES
     loglib/autoqlog.c
