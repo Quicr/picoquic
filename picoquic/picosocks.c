@@ -488,7 +488,6 @@ void picoquic_socks_cmsg_parse(
 #endif
         }
     }
-#endif
 }
 
 #ifdef _WINDOWS
