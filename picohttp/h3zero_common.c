@@ -2162,15 +2162,16 @@ const uint8_t* h3zero_accumulate_capsule(const uint8_t* bytes, const uint8_t* by
 			bytes = NULL;
 		} else {
 			size_t available = bytes_max - bytes;
-			if (capsule->value_read + available > capsule->capsule_length) {
-				available = capsule->capsule_length - capsule->value_read;
+			if (capsule->capsule_length > capsule->value_read && capsule->value_read + available > capsule->capsule_length) {
+			        available = capsule->capsule_length - capsule->value_read;
 			}
-			memcpy(capsule->capsule_buffer + capsule->value_read, bytes, available);
-			bytes += available;
-			capsule->value_read += available;
-			if (capsule->value_read >= capsule->capsule_length) {
-				capsule->is_stored = 1;
-			}
+
+		        memcpy(capsule->capsule_buffer + capsule->value_read, bytes, available);
+		        bytes += available;
+		        capsule->value_read += available;
+		        if (capsule->value_read >= capsule->capsule_length) {
+		            capsule->is_stored = 1;
+		        }
 		}
 	}
 	return bytes;
