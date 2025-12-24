@@ -56,6 +56,48 @@
 #define socklen_t int
 #endif
 /* clang-format on */
+#elif defined(ESP_PLATFORM) /* ESP32 with lwIP */
+
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/time.h>
+#include <errno.h>
+
+/* lwIP socket API */
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
+#include "lwip/inet.h"
+
+/* ESP platform header provides additional compatibility */
+#include "esp_platform.h"
+
+#ifndef SOL_IPV6
+#define SOL_IPV6 IPPROTO_IPV6
+#endif
+
+#ifndef SOCKET_TYPE
+#define SOCKET_TYPE int
+#endif
+#ifndef INVALID_SOCKET
+#define INVALID_SOCKET -1
+#endif
+#ifndef SOCKET_CLOSE
+#define SOCKET_CLOSE(x) close(x)
+#endif
+#ifndef WSA_LAST_ERROR
+#define WSA_LAST_ERROR(x) ((long)(x))
+#endif
+
+/* lwIP may not have these UDP options */
+#ifndef UDP_SEGMENT
+#define UDP_SEGMENT 103
+#endif
+#ifndef UDP_GRO
+#define UDP_GRO 104
+#endif
+
 #else /* Linux, FreeBSD */
 
 #include "getopt.h"

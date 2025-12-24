@@ -28,6 +28,9 @@
 #include <WS2tcpip.h>
 #include <Ws2def.h>
 #include <winsock2.h>
+#elif defined(ESP_PLATFORM)
+/* ESP32 platform with lwIP stack */
+#include "esp_platform.h"
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>

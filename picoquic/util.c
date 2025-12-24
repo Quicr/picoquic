@@ -27,6 +27,15 @@
 #include <Windows.h>
 #include <WinSock2.h>
 #include <Ws2def.h>
+#elif defined(ESP_PLATFORM)
+/* ESP32 with lwIP */
+#include "lwip/sockets.h"
+#include "lwip/inet.h"
+#include <errno.h>
+#ifdef CONFIG_IDF_TARGET
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#endif
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
