@@ -80,10 +80,12 @@
 #include <sys/select.h>
 
 #ifndef __APPLE__
+#ifndef ESP_PLATFORM
 #ifdef __LINUX__
 #include <linux/prctl.h>  /* Definition of PR_* constants */
 #else
 #include <sys/prctl.h>
+#endif
 #endif
 #endif
 
@@ -108,6 +110,13 @@
 #include "picoquic_internal.h"
 #include "picoquic_packet_loop.h"
 #include "picoquic_unified_log.h"
+
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#include "esp_system.h"
+#include "esp_log.h"
+static const char* SOCKLOOP_TAG = "sockloop";
+#endif
 
 #if defined(_WINDOWS)
 #ifdef UDP_SEND_MSG_SIZE
@@ -349,6 +358,12 @@ int picoquic_packet_loop_open_socket(int socket_buffer_size, int do_not_use_gso,
     struct sockaddr_storage local_address;
     int recv_set = 0;
     int send_set = 0;
+
+#ifdef ESP_PLATFORM
+    ESP_LOGD(SOCKLOOP_TAG, "open_socket: af=%d, port=%d, buf=%d", s_ctx->af, s_ctx->port, socket_buffer_size);
+#endif
+    DBG_PRINTF("open_socket: af=%d, port=%d, buf=%d", s_ctx->af, s_ctx->port, socket_buffer_size);
+
 #ifdef _WINDOWS
     int recv_coalesced = 0;
     int send_coalesced = 0;
@@ -365,20 +380,71 @@ int picoquic_packet_loop_open_socket(int socket_buffer_size, int do_not_use_gso,
     s_ctx->fd = WSASocket(s_ctx->af, SOCK_DGRAM, IPPROTO_UDP, NULL, 0, WSA_FLAG_OVERLAPPED);
 #else
     s_ctx->fd = socket(s_ctx->af, SOCK_DGRAM, IPPROTO_UDP);
+#ifdef ESP_PLATFORM
+    ESP_LOGD(SOCKLOOP_TAG, "open_socket: socket() returned fd=%d", s_ctx->fd);
+#endif
+    DBG_PRINTF("open_socket: socket() returned fd=%d", s_ctx->fd);
 #endif
 
-    if (s_ctx->fd == INVALID_SOCKET ||
-#ifndef ESP_PLATFORM
-        // /* TODO: set option IPv6 only */
-        picoquic_socket_set_ecn_options(s_ctx->fd, s_ctx->af, &recv_set, &send_set) != 0 ||
+    if (s_ctx->fd == INVALID_SOCKET) {
+#ifdef ESP_PLATFORM
+        ESP_LOGE(SOCKLOOP_TAG, "open_socket: socket creation FAILED af=%d, errno=%d", s_ctx->af, errno);
 #endif
-        picoquic_socket_set_pkt_info(s_ctx->fd, s_ctx->af) != 0 ||
-        picoquic_bind_to_port(s_ctx->fd,s_ctx->af, s_ctx->port) != 0 ||
-        picoquic_get_local_address(s_ctx->fd, &local_address) != 0 ||
-        picoquic_socket_set_pmtud_options(s_ctx->fd, s_ctx->af) != 0)
-    {
-        DBG_PRINTF("Cannot set socket (af=%d, port = %d)\n", s_ctx->af, s_ctx->port);
+        DBG_PRINTF("open_socket: socket creation FAILED af=%d", s_ctx->af);
         ret = -1;
+    }
+#ifndef ESP_PLATFORM
+    else if (picoquic_socket_set_ecn_options(s_ctx->fd, s_ctx->af, &recv_set, &send_set) != 0) {
+        DBG_PRINTF("open_socket: set_ecn_options FAILED fd=%d", s_ctx->fd);
+        ret = -1;
+    }
+    else {
+        if (picoquic_socket_set_pkt_info(s_ctx->fd, s_ctx->af) != 0) {
+            DBG_PRINTF("open_socket: set_pkt_info FAILED fd=%d", s_ctx->fd);
+            ret = -1;
+        }
+    }
+#else
+    /* ESP32/lwIP: skip ECN and PKTINFO options - not supported */
+    (void)recv_set;
+    (void)send_set;
+#endif
+
+    if (ret == 0) {
+        if (picoquic_bind_to_port(s_ctx->fd, s_ctx->af, s_ctx->port) != 0) {
+#ifdef ESP_PLATFORM
+            ESP_LOGE(SOCKLOOP_TAG, "open_socket: bind_to_port FAILED fd=%d, errno=%d", s_ctx->fd, errno);
+#endif
+            DBG_PRINTF("open_socket: bind_to_port FAILED fd=%d", s_ctx->fd);
+            ret = -1;
+        }
+    }
+
+    if (ret == 0) {
+        if (picoquic_get_local_address(s_ctx->fd, &local_address) != 0) {
+#ifdef ESP_PLATFORM
+            ESP_LOGE(SOCKLOOP_TAG, "open_socket: get_local_address FAILED fd=%d, errno=%d", s_ctx->fd, errno);
+#endif
+            DBG_PRINTF("open_socket: get_local_address FAILED fd=%d", s_ctx->fd);
+            ret = -1;
+        }
+    }
+
+    if (ret == 0) {
+        if (picoquic_socket_set_pmtud_options(s_ctx->fd, s_ctx->af) != 0) {
+#ifdef ESP_PLATFORM
+            ESP_LOGE(SOCKLOOP_TAG, "open_socket: set_pmtud_options FAILED fd=%d, errno=%d", s_ctx->fd, errno);
+#endif
+            DBG_PRINTF("open_socket: set_pmtud_options FAILED fd=%d", s_ctx->fd);
+            ret = -1;
+        }
+    }
+
+    if (ret != 0) {
+#ifdef ESP_PLATFORM
+        ESP_LOGE(SOCKLOOP_TAG, "Cannot set socket (af=%d, port=%d)", s_ctx->af, s_ctx->port);
+#endif
+        DBG_PRINTF("Cannot set socket (af=%d, port=%d)", s_ctx->af, s_ctx->port);
     }
     else {
 
@@ -445,6 +511,9 @@ int picoquic_packet_loop_open_socket(int socket_buffer_size, int do_not_use_gso,
         if (ret == 0) {
             ret = picoquic_packet_set_windows_socket(send_coalesced, recv_coalesced, s_ctx);
         }
+#endif
+#ifdef ESP_PLATFORM
+        ESP_LOGD(SOCKLOOP_TAG, "open_socket: SUCCESS fd=%d, port=%d", s_ctx->fd, s_ctx->port);
 #endif
     }
 
@@ -572,7 +641,7 @@ int picoquic_packet_loop_wait(picoquic_socket_ctx_t* s_ctx,
                 ResetEvent(s_ctx[*socket_rank].overlap.hEvent);
 
                 if (ret != 0) {
-                    DBG_PRINTF("%s", "Cannot finish async recv");
+                    DBG_PRINTF("Cannot finish async recv, ret=%d", ret);
                     bytes_recv = -1;
                 }
                 else {
@@ -634,7 +703,7 @@ int picoquic_packet_loop_select(picoquic_socket_ctx_t* s_ctx,
     }
 
     *is_wake_up_event = 0;
-    if (thread_ctx->wake_up_defined) {
+    if (thread_ctx->wake_up_defined && thread_ctx->wake_up_pipe_fd[0] >= 0) {
         if (sockmax < (int)thread_ctx->wake_up_pipe_fd[0]) {
             sockmax = (int)thread_ctx->wake_up_pipe_fd[0];
         }
@@ -662,7 +731,8 @@ int picoquic_packet_loop_select(picoquic_socket_ctx_t* s_ctx,
     } else if (ret_select > 0) {
         /* Check if the 'wake up' pipe is full. If it is, read the data on it,
          * set the is_wake_up_event flag, and ignore the other file descriptors. */
-        if (thread_ctx->wake_up_defined && FD_ISSET(thread_ctx->wake_up_pipe_fd[0], &readfds)) {
+        if (thread_ctx->wake_up_defined && thread_ctx->wake_up_pipe_fd[0] >= 0 &&
+            FD_ISSET(thread_ctx->wake_up_pipe_fd[0], &readfds)) {
             /* Something was written on the "wakeup" pipe. Read it. */
             uint8_t eventbuf[8];
             int pipe_recv;
@@ -778,6 +848,8 @@ void* picoquic_packet_loop_v3(void* v_ctx)
     (void)WSA_START(MAKEWORD(2, 2), &wsaData);
 #endif
 
+    DBG_PRINTF("packet_loop_v3: ENTERED, buf_size=%zu", send_buffer_size);
+
     if (thread_ctx->thread_name != NULL) {
         thread_ctx->thread_setname_fn(thread_ctx->thread_name);
     }
@@ -786,23 +858,29 @@ void* picoquic_packet_loop_v3(void* v_ctx)
         send_buffer_size = 0xffff;
     }
 
+    DBG_PRINTF("packet_loop_v3: open_sockets port=%d, af=%d", param->local_port, param->local_af);
+
     memset(s_ctx, 0, sizeof(s_ctx));
     if ((nb_sockets = picoquic_packet_loop_open_sockets(param->local_port,
         param->local_af, param->socket_buffer_size,
         param->extra_socket_required, param->do_not_use_gso, s_ctx)) <= 0) {
         ret = PICOQUIC_ERROR_UNEXPECTED_ERROR;
-        DBG_PRINTF("%s", "Thread cannot run:picoquic_packet_loop_open_sockets error ");
+        DBG_PRINTF("packet_loop_v3: open_sockets FAILED, nb=%d", nb_sockets);
     }
-    else if (loop_callback != NULL) {
+    else {
+        DBG_PRINTF("packet_loop_v3: sockets opened, nb=%d", nb_sockets);
+    }
+
+    if (ret == 0 && loop_callback != NULL) {
         struct sockaddr_storage l_addr;
         ret = loop_callback(quic, picoquic_packet_loop_ready, loop_callback_ctx, &options);
         if (ret != 0)
-            DBG_PRINTF("%s", "Thread cannot run:.loopcallback error ");
+            DBG_PRINTF("Thread cannot run: loopcallback error ret=%d", ret);
 
         if (picoquic_store_loopback_addr(&l_addr, s_ctx[0].af, s_ctx[0].port) == 0) {
             ret = loop_callback(quic, picoquic_packet_loop_port_update, loop_callback_ctx, &l_addr);
             if (ret != 0)
-                DBG_PRINTF("%s", "Thread cannot run:store loopcallback error ");
+                DBG_PRINTF("Thread cannot run: store loopcallback error ret=%d", ret);
 
         }
         if (ret == 0 && options.provide_alt_port) {
@@ -821,22 +899,31 @@ void* picoquic_packet_loop_v3(void* v_ctx)
         }
         send_buffer = malloc(send_buffer_size);
         if (send_buffer == NULL) {
-            DBG_PRINTF("Thread cannot run, Malloc Error <%d>", send_buffer_size);
-            DBG_PRINTF("%s", "Thread cannot run:. malloc error");
+            DBG_PRINTF("Thread cannot run: malloc error size=%zu", send_buffer_size);
             ret = -1;
         }
     }
 
     if (ret == 0) {
         thread_ctx->thread_is_ready = 1;
+#ifdef ESP_PLATFORM
+        ESP_LOGD(SOCKLOOP_TAG, "Thread ready, nb_sockets=%d", nb_sockets);
+#endif
+        DBG_PRINTF("Thread ready, nb_sockets=%d", nb_sockets);
     }
     else {
-        DBG_PRINTF("%s", "Thread cannot run");
+#ifdef ESP_PLATFORM
+        ESP_LOGE(SOCKLOOP_TAG, "Thread cannot run, ret=%d", ret);
+#endif
+        DBG_PRINTF("Thread cannot run, ret=%d", ret);
     }
 
     /* Wait for packets */
     /* TODO: add stopping condition, was && (!just_once || !connection_done) */
     /* Actually, no, rely on the callback return code for that? */
+#ifdef ESP_PLATFORM
+    ESP_LOGD(SOCKLOOP_TAG, "Entering main loop");
+#endif
     while (ret == 0 && !thread_ctx->thread_should_close) {
         int socket_rank = -1;
         int64_t delta_t = 0;
@@ -1048,6 +1135,9 @@ void* picoquic_packet_loop_v3(void* v_ctx)
                     }
 
                     if (send_socket == INVALID_SOCKET) {
+#ifdef ESP_PLATFORM
+                        ESP_LOGE(SOCKLOOP_TAG, "sendmsg: no valid socket for af=%d", peer_addr.ss_family);
+#endif
                         sock_ret = -1;
                         sock_err = -1;
                     }
@@ -1067,6 +1157,9 @@ void* picoquic_packet_loop_v3(void* v_ctx)
                         }
                     }
                     if (sock_ret <= 0) {
+#ifdef ESP_PLATFORM
+                        ESP_LOGE(SOCKLOOP_TAG, "sendmsg FAILED: ret=%d, err=%d", sock_ret, sock_err);
+#endif
                         /* TODO: add a test in which the socket fails. */
                         if (last_cnx == NULL) {
                             picoquic_log_context_free_app_message(quic, &log_cid, "Could not send message to AF_to=%d, AF_from=%d, if=%d, ret=%d, err=%d",
@@ -1201,9 +1294,14 @@ static void picoquic_close_network_wake_up(picoquic_network_thread_ctx_t* thread
     if (thread_ctx->wake_up_defined) {
 #ifdef _WINDOWS
         CloseHandle(thread_ctx->wake_up_event);
+#elif defined(ESP_PLATFORM)
+        /* ESP32: we didn't create pipes, nothing to close */
+        (void)0; /* no-op */
 #else
         for (int i = 0; i < 2; i++) {
-            (void)close(thread_ctx->wake_up_pipe_fd[i]);
+            if (thread_ctx->wake_up_pipe_fd[i] >= 0) {
+                (void)close(thread_ctx->wake_up_pipe_fd[i]);
+            }
         }
 #endif
         thread_ctx->wake_up_defined = 0;
@@ -1221,9 +1319,18 @@ static void picoquic_open_network_wake_up(picoquic_network_thread_ctx_t* thread_
     else {
         thread_ctx->wake_up_defined = 1;
     }
+#elif defined(ESP_PLATFORM)
+    /* ESP-IDF doesn't support pipe(), but we still want to start the thread.
+     * We'll just skip the wake-up mechanism - the thread will still work,
+     * it just won't be able to be woken up externally (will rely on timeouts).
+     */
+    thread_ctx->wake_up_defined = 1;
+    thread_ctx->wake_up_pipe_fd[0] = -1;
+    thread_ctx->wake_up_pipe_fd[1] = -1;
 #else
     if (pipe(thread_ctx->wake_up_pipe_fd) != 0) {
         *ret = errno;
+        DBG_PRINTF("pipe() failed with errno=%d", errno);
     }
     else
     {
@@ -1254,15 +1361,16 @@ void picoquic_internal_thread_setname(char const * thread_name)
             DBG_PRINTF("Set thread name <%S> returns: 0x%x", wname, r);
         }
     }
-#else
-#ifdef __APPLE__
+#elif defined(__APPLE__)
     pthread_setname_np(thread_name);
+#elif defined(ESP_PLATFORM)
+    /* ESP-IDF: thread naming not supported via prctl, skip */
+    (void)thread_name;
 #else
     int r=prctl(PR_SET_NAME, thread_name, 0, 0, 0);
     if (r != 0) {
         DBG_PRINTF("Set thread name <%s> returns: 0x%x", thread_name, r);
     }
-#endif
 #endif
 }
 
@@ -1276,10 +1384,19 @@ picoquic_network_thread_ctx_t* picoquic_start_custom_network_thread(picoquic_qui
     picoquic_custom_thread_setname_fn thread_setname_fn, char const* thread_name,
     picoquic_packet_loop_cb_fn loop_callback, void* loop_callback_ctx, int* ret)
 {
+#ifdef ESP_PLATFORM
+    size_t free_heap = esp_get_free_heap_size();
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    ESP_LOGD(SOCKLOOP_TAG, "HEAP: free=%u, internal=%u, largest_block=%u",
+             (unsigned)free_heap, (unsigned)free_internal, (unsigned)largest_block);
+#endif
+
     picoquic_network_thread_ctx_t* thread_ctx = (picoquic_network_thread_ctx_t*)malloc(sizeof(picoquic_network_thread_ctx_t));
     *ret = 0;
 
     if (thread_ctx == NULL) {
+        ESP_LOGE(SOCKLOOP_TAG, "Failed to allocate thread_ctx, size=%u", (unsigned)sizeof(picoquic_network_thread_ctx_t));
         /* Error, no memory */
     }
     else {
@@ -1304,11 +1421,31 @@ picoquic_network_thread_ctx_t* picoquic_start_custom_network_thread(picoquic_qui
                 thread_ctx->thread_delete_fn = picoquic_internal_thread_delete;
             }
             thread_ctx->thread_name = thread_name;
+#ifdef ESP_PLATFORM
+            ESP_LOGD(SOCKLOOP_TAG, "Creating thread, heap=%u, largest=%u",
+                     (unsigned)esp_get_free_heap_size(),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+#endif
             if ((*ret = thread_create_fn((void **)&thread_ctx->pthread, picoquic_packet_loop_v3, (void*)thread_ctx)) != 0) {
                 /* Free the context and return error condition if something went wrong */
+#ifdef ESP_PLATFORM
+                ESP_LOGE(SOCKLOOP_TAG, "Thread create FAILED ret=%d, heap=%u, largest=%u",
+                         *ret,
+                         (unsigned)esp_get_free_heap_size(),
+                         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+#else
+                DBG_PRINTF("Thread creation FAILED, ret=%d", *ret);
+#endif
                 thread_ctx->is_threaded = 0;
                 picoquic_delete_network_thread(thread_ctx);
                 thread_ctx = NULL;
+            }
+            else {
+#ifdef ESP_PLATFORM
+                ESP_LOGD(SOCKLOOP_TAG, "Thread created OK, pthread=%p", (void*)thread_ctx->pthread);
+#else
+                DBG_PRINTF("Thread creation SUCCESS, pthread=%p", (void*)thread_ctx->pthread);
+#endif
             }
         }
     }
@@ -1332,21 +1469,27 @@ int picoquic_wake_up_network_thread(picoquic_network_thread_ctx_t* thread_ctx)
             DBG_PRINTF("Set network event fails, error 0x%x", err);
             ret = (int)err;
         }
+#elif defined(ESP_PLATFORM)
+        /* ESP32: no wake-up pipe available, just return success.
+         * The thread will wake up on next timeout. */
+        (void)0; /* no-op */
 #else
         /* TODO: write to network pipe */
         ssize_t written = 0;
-        if ((written = write(thread_ctx->wake_up_pipe_fd[1], &ret, 1)) != 1) {
-            if (written == 0) {
-                ret = EPIPE;
-            }
-            else {
-                ret = errno;
+        if (thread_ctx->wake_up_pipe_fd[1] >= 0) {
+            if ((written = write(thread_ctx->wake_up_pipe_fd[1], &ret, 1)) != 1) {
+                if (written == 0) {
+                    ret = EPIPE;
+                }
+                else {
+                    ret = errno;
+                }
             }
         }
 #endif
     }
     else {
-        DBG_PRINTF("%s", "Wake up event not defined.");
+        DBG_PRINTF("Wake up event not defined, wake_up_defined=%d", thread_ctx->wake_up_defined);
         ret = -1;
     }
     return ret;
