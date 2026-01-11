@@ -2,3 +2,6 @@
 	path = deps/picotls
 	url = https://github.com/Quicr/picotls.git
 	branch = main
+[submodule "c4"]
+	path = c4
+	url = https://github.com/private-octopus/c4
