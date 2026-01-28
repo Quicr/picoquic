@@ -36,6 +36,7 @@
 #include "autoqlog.h"
 #include "picosocks.h"
 #include "picoquic_ns.h"
+#include "picoquictest_dualq.h"
 
 /*
 * The simulation follows the model established for the "stress" tests: single
@@ -391,11 +392,13 @@ int picoquic_ns_create_link(picoquic_ns_ctx_t* cc_ctx, int link_id)
         ret = -1;
     }
     else {
-        cc_ctx->link[link_id]->l4s_max = link_spec->l4s_max;
         cc_ctx->link[link_id]->nb_loss_in_burst = link_spec->nb_loss_in_burst;
         cc_ctx->link[link_id]->packets_between_losses = link_spec->packets_between_losses;
         cc_ctx->link[link_id]->packets_sent_next_burst = cc_ctx->link[link_id]->packets_sent +
             link_spec->packets_between_losses;
+        if (link_spec->l4s_max > 0) {
+            ret = dualq_configure(cc_ctx->link[link_id], link_spec->l4s_max);
+        }
     }
     return ret;
 }
@@ -583,6 +586,12 @@ picoquic_ns_ctx_t* picoquic_ns_create_ctx(picoquic_ns_spec_t* spec, FILE* err_fd
     return cc_ctx;
 }
 
+void picoquic_ns_packet_admission(picoquic_ns_ctx_t* cc_ctx, int link_id)
+{
+    picoquictest_sim_link_admit_pending(cc_ctx->link[link_id],
+        cc_ctx->simulated_time);
+}
+
 int picoquic_ns_incoming_packet(picoquic_ns_ctx_t* cc_ctx, int link_id)
 {
     int ret = 0;
@@ -717,9 +726,10 @@ void picoquic_ns_simlink_reset(picoquictest_sim_link_t* link, double data_rate_i
     /* Requeue the other packets:
      * reset the queue time to current_time, i.e., after packets in transit are delivered.*/
     link->queue_time = current_time;
-    /* reset the leaky bucket, so it starts working from the current time. */
-    link->bucket_arrival_last = current_time;
-    link->bucket_current = (double)link->bucket_max;
+    /* reset the AQM, so it starts working from the current time. */
+    if (link->aqm_state != NULL) {
+        link->aqm_state->reset(link->aqm_state, link, current_time);
+    }
     /* reset the value of the link parameters */
     pico_d *= (1.024 * 1.024); /* account for binary units */
     link->next_send_time = current_time;
@@ -729,11 +739,13 @@ void picoquic_ns_simlink_reset(picoquictest_sim_link_t* link, double data_rate_i
     link->jitter = vary_link_spec->jitter;
     link->jitter_mode = (vary_link_spec->is_wifi_jitter) ? jitter_wifi : jitter_gauss;
     link->queue_delay_max = vary_link_spec->queue_delay_max;
-    link->l4s_max = vary_link_spec->l4s_max;
     link->is_suspended = (data_rate_in_gps <= 0);
     link->nb_loss_in_burst = vary_link_spec->nb_loss_in_burst;
     link->packets_between_losses = vary_link_spec->packets_between_losses;
     link->packets_sent_next_burst = link->packets_sent + vary_link_spec->packets_between_losses;
+    if (link->aqm_state != NULL) {
+        link->aqm_state->reset(link->aqm_state, link, current_time);
+    }
 
 
     /* Reschedule the next packets */
@@ -784,6 +796,7 @@ int picoquic_ns_step(picoquic_ns_ctx_t* cc_ctx, int* is_active)
         no_action,
         link_transition,
         link_departure,
+        link_admission,
         prepare_packet,
         start_connection
     } next_action = no_action;
@@ -796,6 +809,12 @@ int picoquic_ns_step(picoquic_ns_ctx_t* cc_ctx, int* is_active)
 
     /* Check whether there is something to receive */
     for (int i = 0; i < PICOQUIC_NS_NB_LINKS; i++) {
+        uint64_t t_admission = picoquictest_sim_link_next_admission(cc_ctx->link[i], cc_ctx->simulated_time, t_next_action);
+        if (t_admission < t_next_action) {
+            t_next_action = t_admission;
+            link_id_next = i;
+            next_action = link_admission;
+        }
         if (cc_ctx->link[i]->first_packet != NULL) {
             uint64_t t_arrival = picoquictest_sim_link_next_arrival(cc_ctx->link[i], t_next_action);
             if (t_arrival < t_next_action) {
@@ -840,6 +859,10 @@ int picoquic_ns_step(picoquic_ns_ctx_t* cc_ctx, int* is_active)
         break;
     case link_departure:
         ret = picoquic_ns_incoming_packet(cc_ctx, link_id_next);
+        *is_active = 1;
+        break;
+    case link_admission:
+        picoquic_ns_packet_admission(cc_ctx, link_id_next);
         *is_active = 1;
         break;
     case prepare_packet:
@@ -958,7 +981,9 @@ int picoquic_ns(picoquic_ns_spec_t* spec, FILE* err_fd)
     int nb_inactive = 0;
 
     if (cc_ctx == NULL) {
-        fprintf(err_fd, "Cannot allocate simulation context.\n");
+        if (err_fd != NULL) {
+            fprintf(err_fd, "Cannot allocate simulation context.\n");
+        }
         ret = -1;
     }
     while (ret == 0) {
@@ -992,7 +1017,7 @@ int picoquic_ns(picoquic_ns_spec_t* spec, FILE* err_fd)
     }
     if (err_fd != NULL && ret != 0) {
         fprintf(err_fd, "Simulated time %" PRIu64 ", ret = %d(0x%x)\n",
-            cc_ctx->simulated_time, ret, ret);
+            (cc_ctx!=NULL)?cc_ctx->simulated_time:0, ret, ret);
     }
 
     if (ret == 0 &&
